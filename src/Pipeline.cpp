@@ -1214,7 +1214,7 @@ void Pipeline::infer_input_bounds(Realization dst) {
         // Make a copy of the buffers that might be mutated
         for (TrackedBuffer &tb : tracked_buffers) {
             // Make a copy of the buffer sizes, etc.
-            tb.orig = tb.query;
+            tb.orig = tb.query.make_alias();
         }
 
         Internal::debug(2) << "Calling jitted function\n";

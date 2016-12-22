@@ -8,7 +8,8 @@ int main(int argc, char **argv) {
     Buffer<int> im(1000, 1000, 3);
 
     // Make the image non-dense in memory to make life more interesting
-    im = im.cropped(0, 100, 800).cropped(1, 200, 600);
+    im.crop(0, 100, 800);
+    im.crop(1, 200, 600);
 
     im.for_each_element([&](int x, int y, int c) {
             im(x, y, c) = 10*x + 5*y + c;

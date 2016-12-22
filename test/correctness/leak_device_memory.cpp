@@ -35,8 +35,7 @@ int main(int argc, char **argv) {
             // Make a shallow copy of the original buf, put it in a
             // Halide::Buffer, and then run a Pipeline that triggers a
             // gpu copy of it.
-            Halide::Runtime::Buffer<float> shallow_copy = buf;
-            Halide::Buffer<float> copy(std::move(shallow_copy));
+            Halide::Buffer<float> copy(buf.make_alias());
             Func f;
             Var x, y;
             f(x, y) = copy(x, y);

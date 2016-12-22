@@ -44,8 +44,12 @@ int main(int argc, char **argv) {
         check_equal(a, a.copy());
 
         // Check copying from one subregion to another (with different memory layout)
-        Buffer<float> a_window = a.cropped(0, 20, 20).cropped(1, 50, 10);
-        Buffer<const float> b_window = b.cropped(0, 20, 20).cropped(1, 50, 10);
+        Buffer<float> a_window = a.make_alias();
+        a_window.crop(0, 20, 20);
+        a_window.crop(1, 50, 10);
+        Buffer<const float> b_window = b.make_alias();
+        b_window.crop(0, 20, 20);
+        b_window.crop(1, 50, 10);
         a_window.copy_from(b);
 
         check_equal(a_window, b_window);
@@ -56,21 +60,23 @@ int main(int argc, char **argv) {
         check_equal(a_window, b_window);
 
         // The buffers can have dynamic type
-        Buffer<void> a_void(a);
-        Buffer<const void> b_void_window(b_window);
+        Buffer<void> &a_void(a.as<void>());
+        Buffer<const void> &b_void_window(b_window.as<const void>());
         a.fill(1.0f);
         a_void.copy_from(b_void_window);
         check_equal(a_window, b_window);
     }
 
     {
-        // Check make a Buffer from a Buffer of a different type
-        Buffer<float, 2> a(100, 80);
-        Buffer<const float, 3> b(a); // statically safe
-        Buffer<const void, 4> c(b);  // statically safe
-        Buffer<const float, 3> d(c); // does runtime checks of actual dimensionality and type.
-        Buffer<void, 3> e(a);        // statically safe
-        Buffer<float, 2> f(e);       // runtime checks
+        // Check make a Buffer reference from a Buffer of a different type
+        Buffer<float, 4> a(100, 80);
+        auto &b = a.as<const float, 3>(); // statically safe
+        auto &c = b.as<const void, 3>();  // statically safe
+        auto &d = c.as<const float, 2>(); // does runtime checks of actual type.
+        auto &e = a.as<void, 3>();        // statically safe
+        auto &f = e.as<float, 2>();       // runtime checks
+        (void)d;
+        (void)f;
     }
 
     {
@@ -79,7 +85,7 @@ int main(int argc, char **argv) {
         a.for_each_element([&](int x, int y, int c) {
             a(x, y, c) = x + 100.0f * y + 100000.0f * c;
         });
-        Buffer<float> b(a);
+        Buffer<float> b = a.copy();
         b.set_min(123, 456, 2);
         b.translate({-123, -456, -2});
         check_equal(a, b);

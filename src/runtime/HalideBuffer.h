@@ -49,7 +49,6 @@ struct halide_dimension_t {
 };
 
 namespace Halide {
-namespace Runtime {
 
 // Forward declare some methods that are needed when using Buffer in a
 // JIT context with GPU-using pipelines.
@@ -58,6 +57,8 @@ enum class DeviceAPI;
 extern EXPORT const halide_device_interface_t *get_default_device_interface_for_target(const Target &);
 extern EXPORT const halide_device_interface_t *get_device_interface_for_device_api(const DeviceAPI &, const Target &);
 extern EXPORT const Target &get_const_ref_to_jit_target_from_environment();
+
+namespace Runtime {
 
 template<typename Fn>
 void for_each_element(const buffer_t &buf, Fn &&f);
@@ -486,6 +487,7 @@ public:
         assert(can_convert_from(other));
     }
 
+private:
     /** Copy constructor. Does not copy underlying data. */
     Buffer(const Buffer<T, D> &other) : buf(other.buf),
                                         dims(other.dims),
@@ -494,7 +496,9 @@ public:
         other.incref();
         dev_ref_count = other.dev_ref_count;
     }
+public:
 
+#if 0
     /** Construct a Buffer from a Buffer of different dimensionality
      * and type. Asserts that the dimensionality and type is
      * compatible at runtime. Note that this constructor is
@@ -510,6 +514,7 @@ public:
         other.incref();
         dev_ref_count = other.dev_ref_count;
     }
+#endif
 
     /** Move constructor */
     Buffer(Buffer<T, D> &&other) : buf(other.buf),
@@ -534,6 +539,7 @@ public:
         other.alloc = nullptr;
     }
 
+#if 0
     /** Assign from another Buffer of possibly-different
      * dimensionality and type. Asserts that the dimensionality and
      * type is compatible at runtime. */
@@ -552,7 +558,9 @@ public:
         buf = other.buf;
         return *this;
     }
+#endif
 
+private:
     Buffer<T, D> &operator=(const Buffer<T, D> &other) {
         if (this == &other) {
             return *this;
@@ -566,6 +574,7 @@ public:
         dims = other.dims;
         return *this;
     }
+public:
 
     /** Move from another Buffer of possibly-different dimensionality
      * and type. Asserts that the dimensionality and
@@ -856,7 +865,7 @@ public:
      * buffer type is void. */
     template<typename T2, int D2 = D,
              typename = typename std::enable_if<(D2 <= D)>::type>
-    Buffer<T2, D2> &as() & {
+    Buffer<T2, D2> &as() {
         Buffer<T2, D>::assert_can_convert_from(*this);
         return *((Buffer<T2, D2> *)this);
     }
@@ -867,7 +876,7 @@ public:
      * source buffer type is void. */
     template<typename T2, int D2 = D,
              typename = typename std::enable_if<(D2 <= D)>::type>
-    const Buffer<T2, D2> &as() const &  {
+    const Buffer<T2, D2> &as() const {
         Buffer<T2, D>::assert_can_convert_from(*this);
         return *((const Buffer<T2, D2> *)this);
     }
@@ -934,8 +943,8 @@ public:
     */
     template<typename T2, int D2>
     void copy_from(const Buffer<T2, D2> &other) {
-        Buffer<const T, D> src(other);
-        Buffer<T, D> dst(*this);
+        auto src = other.as<const T, D>().make_alias();
+        auto dst = this->make_alias();
 
         assert(src.dimensions() == dst.dimensions());
 
@@ -980,18 +989,6 @@ public:
         set_host_dirty();
     }
 
-    /** Make an image that refers to a sub-range of this image along
-     * the given dimension. Does not assert the crop region is within
-     * the existing bounds. The cropped image drops any device
-     * handle. */
-    Buffer<T, D> cropped(int d, int min, int extent) const {
-        // Make a fresh copy of the underlying buffer (but not a fresh
-        // copy of the allocation, if there is one).
-        Buffer<T, D> im = *this;
-        im.crop(d, min, extent);
-        return im;
-    }
-
     /** Crop an image in-place along the given dimension. */
     void crop(int d, int min, int extent) {
         // assert(dim(d).min() <= min);
@@ -1005,17 +1002,6 @@ public:
         buf.extent[d] = extent;
     }
 
-    /** Make an image that refers to a sub-rectangle of this image along
-     * the first N dimensions. Does not assert the crop region is within
-     * the existing bounds. The cropped image drops any device handle. */
-    Buffer<T, D> cropped(const std::vector<std::pair<int, int>> &rect) const {
-        // Make a fresh copy of the underlying buffer (but not a fresh
-        // copy of the allocation, if there is one).
-        Buffer<T, D> im = *this;
-        im.crop(rect);
-        return im;
-    }
-
     /** Crop an image in-place along the first N dimensions. */
     void crop(const std::vector<std::pair<int, int>> &rect) {
         for (int i = 0; i < rect.size(); i++) {
@@ -1023,28 +1009,10 @@ public:
         }
     }
 
-    /** Make an image which refers to the same data with using
-     * translated coordinates in the given dimension. Positive values
-     * move the image data to the right or down relative to the
-     * coordinate system. Drops any device handle. */
-    Buffer<T, D> translated(int d, int dx) const {
-        Buffer<T, D> im = *this;
-        im.translate(d, dx);
-        return im;
-    }
-
     /** Translate an image in-place along one dimension */
     void translate(int d, int delta) {
         device_deallocate();
         buf.min[d] += delta;
-    }
-
-    /** Make an image which refers to the same data translated along
-     * the first N dimensions. */
-    Buffer<T, D> translated(const std::vector<int> &delta) {
-        Buffer<T, D> im = *this;
-        im.translate(delta);
-        return im;
     }
 
     /** Translate an image along the first N dimensions */
@@ -1081,27 +1049,11 @@ public:
         return true;
     }
 
-    /** Make an image which refers to the same data using a different
-     * ordering of the dimensions. */
-    Buffer<T, D> transposed(int d1, int d2) const {
-        Buffer<T, D> im = *this;
-        im.transpose(d1, d2);
-        return im;
-    }
-
     /** Transpose an image in-place */
     void transpose(int d1, int d2) {
         std::swap(buf.min[d1], buf.min[d2]);
         std::swap(buf.extent[d1], buf.extent[d2]);
         std::swap(buf.stride[d1], buf.stride[d2]);
-    }
-
-    /** Make a lower-dimensional image that refers to one slice of this
-     * image. */
-    Buffer<T, D-1> sliced(int d, int pos) const {
-        Buffer<T, D> im = *this;
-        im.slice(d, pos);
-        return Buffer<T, D-1>(std::move(im));
     }
 
     /** Slice an image in-place */
@@ -1118,27 +1070,6 @@ public:
             buf.min[i] = buf.min[i+1];
         }
         buf.stride[dims] = buf.extent[dims] = buf.min[dims] = 0;
-    }
-
-    /** Make a new image that views this image as a single slice in a
-     * higher-dimensional space. The new dimension has extent one and
-     * the given min. This operation is the opposite of slice. As an
-     * example, the following condition is true:
-     *
-     \code
-     im2 = im.embedded(1, 17);
-     &im(x, y, c) == &im2(x, 17, y, c);
-     \endcode
-     */
-    Buffer<T, D+1> embedded(int d, int pos) const {
-        assert(d >= 0 && d <= dimensions());
-        Buffer<T, D+1> im(*this);
-        im.add_dimension();
-        im.translate(im.dimensions() - 1, pos);
-        for (int i = im.dimensions(); i > d; i--) {
-            im.transpose();
-        }
-        return im;
     }
 
     /** Embed an image in-place, increasing the
@@ -1323,6 +1254,19 @@ public:
         return im;
     }
 
+    /** Make a new Buffer of which refers to the same allocation as
+     * this Buffer, but has its own metadata (dimensionality, shape,
+     * dirty flags, etc). Use with care. The underlying host and
+     * device allocations are preserved as long as any aliases
+     * exist. If an alias is given a device allocation, the original
+     * Buffer is not updated to reflect this, and it is freed when the
+     * alias is freed.
+     */
+    Buffer<T, D> make_alias() const {
+        // We can just call the copy-constructor, which is private.
+        return *this;
+    }
+
     /** Make a zero-dimensional Buffer */
     static Buffer<add_const_if_T_is_const<void>, D> make_scalar(halide_type_t t) {
         Buffer<add_const_if_T_is_const<void>, 1> buf(t, 1);
@@ -1340,34 +1284,39 @@ public:
     /** Make a buffer with the same shape and memory nesting order as
      * another buffer. It may have a different type. */
     template<typename T2, int D2>
-    static Buffer<T, D> make_with_shape_of(Buffer<T2, D2> src,
+    static Buffer<T, D> make_with_shape_of(const Buffer<T2, D2> &src,
                                            void *(*allocate_fn)(size_t) = nullptr,
                                            void (*deallocate_fn)(void *) = nullptr) {
         assert(D >= src.dimensions());
 
-        // Reorder the dimensions of src to have strides in increasing order
-        int swaps[(D2*(D2+1))/2];
-        int swaps_idx = 0;
-        for (int i = src.dimensions()-1; i > 0; i--) {
-            for (int j = i; j > 0; j--) {
-                if (src.dim(j-1).stride() > src.dim(j).stride()) {
-                    src.transpose(j-1, j);
-                    swaps[swaps_idx++] = j;
+        // Figure out the dimension that has each nesting order based
+        // on the strides. If nesting_order[0] == d, then d is the
+        // innermost dimension.
+        int nesting_order[D2];
+        for (int i = 0; i < src.dimensions(); i++) {
+            int my_stride = src.dim(i).stride();
+            int count = 0;
+            // Count how many dimensions have a smaller stride
+            for (int j = 0; j < src.dimensions(); j++) {
+                if (src.dim(j).stride() < my_stride ||
+                    (src.dim(j).stride() == my_stride && j > i)) {
+                    count++;
                 }
             }
+            nesting_order[count] = i;
         }
 
         halide_dimension_t shape[D2];
         for (int i = 0; i < src.dimensions(); i++) {
-            shape[i].min = src.dim(i).min();
-            shape[i].extent = src.dim(i).extent();
-            shape[i].stride = src.dim(i).stride();
-        }
-
-        // Undo the dimension reordering
-        while (swaps_idx > 0) {
-            int j = swaps[--swaps_idx];
-            std::swap(shape[j-1], shape[j]);
+            int d = nesting_order[i];
+            shape[d].min = src.dim(d).min();
+            shape[d].extent = src.dim(d).extent();
+            if (i == 0) {
+                shape[d].stride = 1;
+            } else {
+                int prev = nesting_order[i-1];
+                shape[d].stride = shape[prev].extent * shape[prev].stride;
+            }
         }
 
         Buffer<T, D> dst(nullptr, src.dimensions(), shape);
@@ -1569,7 +1518,7 @@ public:
      * autovectorize. This is slightly cheaper than for_each_element,
      * because it does not need to track the coordinates. */
     template<typename Fn, typename ...Args, int N = sizeof...(Args) + 1>
-    void for_each_value(Fn &&f, Args... other_buffers) {
+    void for_each_value(Fn &&f, Args&&... other_buffers) {
         for_each_value_task_dim<N> t[D+1];
         for (int i = 0; i <= D; i++) {
             for (int j = 0; j < N; j++) {
