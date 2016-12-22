@@ -1225,7 +1225,8 @@ public:
      * device allocations are preserved as long as any aliases
      * exist. If an alias is given a device allocation, the original
      * Buffer is not updated to reflect this, and it is freed when the
-     * alias is freed.
+     * alias (and any further aliases that originate from it) is
+     * freed.
      */
     Buffer<T, D> make_alias() const {
         // We can just call the copy-constructor, which is private.
