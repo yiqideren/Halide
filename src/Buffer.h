@@ -5,6 +5,7 @@
 #include "IntrusivePtr.h"
 #include "Expr.h"
 #include "Util.h"
+#include "DeviceInterface.h"
 
 namespace Halide {
 
@@ -288,14 +289,14 @@ public:
 #define HALIDE_BUFFER_FORWARD_CONST(method)                             \
     template<typename ...Args>                                          \
     auto method(Args&&... args) const ->                                \
-        decltype(get()->method(std::forward<Args>(args)...)) {          \
+        decltype(((const Runtime::Buffer<T> &)Runtime::Buffer<T>()).method(std::forward<Args>(args)...)) { \
         return get()->method(std::forward<Args>(args)...);              \
     }
 
 #define HALIDE_BUFFER_FORWARD(method)                                   \
     template<typename ...Args>                                          \
     auto method(Args&&... args) ->                                      \
-        decltype(get()->method(std::forward<Args>(args)...)) {          \
+        decltype(Runtime::Buffer<T>().method(std::forward<Args>(args)...)) { \
         return get()->method(std::forward<Args>(args)...);              \
     }
 
@@ -404,6 +405,29 @@ public:
         return buffer_accessor(Buffer<>(*this), args);
     };
     // @}
+
+
+    /** Copy to the GPU, using the device API that is the default for the given Target. */
+    int copy_to_device(const Target &t = get_jit_target_from_environment()) {
+        return contents->buf.copy_to_device(get_default_device_interface_for_target(t));
+    }
+
+    /** Copy to the GPU, using the given device API */
+    int copy_to_device(const DeviceAPI &d, const Target &t = get_jit_target_from_environment()) {
+        return contents->buf.copy_to_device(get_device_interface_for_device_api(d, t));
+    }
+
+    /** Allocate on the GPU, using the device API that is the default for the given Target. */
+    int device_malloc(const Target &t = get_jit_target_from_environment()) {
+        return contents->buf.device_malloc(get_default_device_interface_for_target(t));
+    }
+
+    /** Allocate storage on the GPU, using the given device API */
+    int device_malloc(const DeviceAPI &d, const Target &t = get_jit_target_from_environment()) {
+        return contents->buf.device_malloc(get_device_interface_for_device_api(d, t));
+    }
+
+
 };
 
 }
