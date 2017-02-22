@@ -1167,8 +1167,9 @@ protected:
     std::vector<Parameter> parameters_;
 
     EXPORT void init_internals();
+public:
     EXPORT void set_inputs(const std::vector<StubInput> &inputs);
-
+protected:
     EXPORT virtual void set_def_min_max();
 
     EXPORT void verify_internals() const override;
@@ -1810,7 +1811,7 @@ public:
     // Allow Output<Func> = Func
     template <typename T2 = T, typename std::enable_if<!std::is_array<T2>::value>::type * = nullptr>
     GeneratorOutput_Func<T> &operator=(const Func &f) {
-        // Don't bother verifying the Func type, dimensions, etc., here: 
+        // Don't bother verifying the Func type, dimensions, etc., here:
         // That's done later, when we produce the pipeline.
         get_assignable_func_ref(0) = f;
         return *this;
@@ -2115,7 +2116,9 @@ private:
         generator_name = n;
     }
 
+public:
     EXPORT void set_inputs(const std::vector<std::vector<StubInput>> &inputs);
+private:
 
     GeneratorBase(const GeneratorBase &) = delete;
     void operator=(const GeneratorBase &) = delete;
