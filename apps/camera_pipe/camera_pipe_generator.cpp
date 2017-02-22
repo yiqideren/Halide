@@ -28,17 +28,39 @@ Func interleave_y(Func a, Func b) {
     return out;
 }
 
-class Demosaic : public Halide::Generator<Demosaic> {
-public:
-    // Inputs and outputs
-    Input<Func> deinterleaved { "deinterleaved", Int(16), 3 };
-    Output<Func> output { "output", Int(16), 3 };
+// New Input/Output-like classes that would have to exist. Implemented
+// in a way that barely compiles for Func inputs and outputs only.
+template<typename T1, typename Scalar_T = T1, int dims = 0> struct Input {
+    T1 t;
+    Input() {}
+    Input(const T1 &t) : t(t) {}
+    void operator=(const T1 &t1) {t = t1;}
+    operator T1() {return t;}
+    template<typename... Args>
+    FuncRef operator()(Args... args) {return t(args...);}
+};
+template<typename T1, typename Scalar_T = T1, int dims = 0> struct Output {
+    T1 t;
+    Output() {}
+    Output(const T1 &t) : t(t) {}
+    void operator=(const T1 &t1) {t = t1;}
+    operator T1() {return t;}
+    template<typename... Args>
+    FuncRef operator()(Args... args) {return t(args...);}
+};
+
+
+struct Demosaic {
 
     // Intermediate stencil stages to schedule
     vector<Func> intermediates;
 
-    // Defines outputs using inputs
-    void generate() {
+    // Outputs. If there's only one, you can also just inherit from it
+    // so that you can be implicitly treated as your sole output.
+    Output<Func, int16_t, 3> output;
+
+    // Constructor defines outputs using inputs
+    Demosaic(Input<Func, int16_t, 3> deinterleaved) {
         // These are the values we already know from the input
         // x_y = the value of channel x at a site in the input of channel y
         // gb refers to green sites in the blue rows
@@ -143,13 +165,13 @@ public:
         intermediates.push_back(g_b);
     }
 
-    // When compiled standalone, schedule is called with zero arguments. Could also be a lambda.
-    void schedule(Func processed = Func()) {
-        int vec = get_target().natural_vector_size(UInt(16));
-        bool use_hexagon = get_target().features_any_of({Target::HVX_64, Target::HVX_128});
-        if (get_target().has_feature(Target::HVX_64)) {
+    // When compiled standalone, schedule is called with just the target argument. Could also be a lambda.
+    void schedule(Target target, Func processed = Func()) {
+        int vec = target.natural_vector_size(UInt(16));
+        bool use_hexagon = target.features_any_of({Target::HVX_64, Target::HVX_128});
+        if (target.has_feature(Target::HVX_64)) {
             vec = 32;
-        } else if (get_target().has_feature(Target::HVX_128)) {
+        } else if (target.has_feature(Target::HVX_128)) {
             vec = 64;
         }
         if (processed.defined()) {
@@ -189,41 +211,6 @@ public:
                 f.align_storage(x, vec);
             }
         }
-    }
-
-    // Implementation junk that would be in the base class below.
-
-    // Stupid reference class to make the prototype work. Pay no
-    // attention.
-    struct Ref {
-        std::unique_ptr<Demosaic> gen;
-        operator Func() {
-            return Func(*gen);
-        }
-        template<typename... Args>
-        void schedule(Args... args) {
-            gen->schedule(std::forward<Args...>(args...));
-        }
-    };
-
-    // This would be a variadic function in the base class that
-    // iterates over the inputs setting them to the args. Generators
-    // are non-copyable right now, so I'll return some ad-hoc smart
-    // reference class that forwards the right things. This would
-    // ideally just return Demosaic, but that would require thinking
-    // about the object instance registry some more.
-    static Demosaic::Ref generate(Func d) {
-        Ref ref;
-        ref.gen.reset(new Demosaic);
-        ref.gen->deinterleaved.set_inputs({Internal::StubInput(d)});
-        ref.gen->generate();
-        return ref;
-    }
-
-    // Should also be in the base class
-    operator Func() {
-        // Return first output, just like a stub
-        return output;
     }
 };
 
@@ -374,8 +361,8 @@ Func CameraPipe::build() {
 
     Func denoised = hot_pixel_suppression(shifted);
     Func deinterleaved = deinterleave(denoised);
-    auto demosaiced = Demosaic::generate(deinterleaved);
-    Func corrected = color_correct(demosaiced);
+    auto demosaiced = Demosaic(deinterleaved);
+    Func corrected = color_correct(demosaiced.output);
     Func processed = apply_curve(corrected);
 
     // Schedule
@@ -414,7 +401,7 @@ Func CameraPipe::build() {
         .unroll(c)
         .parallel(yo);
 
-    demosaiced.schedule(processed);
+    demosaiced.schedule(get_target(), processed);
 
     if (get_target().features_any_of({Target::HVX_64, Target::HVX_128})) {
         processed.hexagon();
@@ -434,5 +421,8 @@ Func CameraPipe::build() {
 
 
 Halide::RegisterGenerator<CameraPipe> register_me{"camera_pipe"};
+
+// Has to do a bunch of crazy introspection on the constructors to Demosaic
+// Halide::RegisterGenerator<Demosaic> register_me_too{"demosaic"};
 
 }  // namespace
