@@ -1600,8 +1600,6 @@ Partitioner::find_best_tile_config(const Group &g) {
         }
     }
 
-    debug(3) << "\nBest grouping:\n" << best_group << '\n';
-
     return make_pair(best_config, best_analysis);
 }
 
@@ -1727,7 +1725,8 @@ void Partitioner::group(Partitioner::Level level) {
         if (debug::debug_level() >= 3) {
             disp_pipeline_costs();
         }
-        internal_assert(can_prove(pre_merge.arith + pre_merge.memory >=
+        internal_assert((!pre_merge.defined() && !post_merge.defined()) ||
+                        can_prove(pre_merge.arith + pre_merge.memory >=
                                   post_merge.arith + post_merge.memory));
     }
 }
@@ -1765,7 +1764,7 @@ DimBounds Partitioner::get_bounds_from_tile_sizes(const FStage &s,
             internal_assert(extent.defined());
             if (can_prove(extent >= 2 * size)) {
                 // TODO: Maybe shift this to the center of the pipeline bound
-                bounds[var] = Interval(0, size - 1);
+                bounds[var] = Interval(0, simplify(size - 1));
             } else {
                 // If the dimension is too small, do not tile it and set the
                 // extent of the bounds to that of the dimension estimate
@@ -2012,8 +2011,6 @@ Partitioner::GroupAnalysis Partitioner::analyze_group(const Group &g, bool show_
         Cost(per_tile_cost.arith * estimate_tiles, per_tile_cost.memory * estimate_tiles),
         parallelism);
     g_analysis.simplify();
-
-    debug(0) << "\nanalysis: " << g_analysis << "\n";
 
     internal_assert(can_prove(g_analysis.cost.memory > 0)) << "g_analysis.cost.memory: " << g_analysis.cost.memory << "\n";
 
