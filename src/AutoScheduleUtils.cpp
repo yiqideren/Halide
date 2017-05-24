@@ -11,31 +11,30 @@ using std::set;
 using std::vector;
 
 Expr get_extent(const Interval &i) {
-    // TODO(psuriana): Should make this more general (symbolic constants)
-    // The concrete extent of a interval can be determined only when both the
-    // expressions for min and max are integers.
-    if (i.min.as<IntImm>() && i.max.as<IntImm>()) {
-        const IntImm *bmin = i.min.as<IntImm>();
-        const IntImm *bmax = i.max.as<IntImm>();
-        // The extent only makes sense when the max >= min otherwise
-        // it is considered to be zero.
-        if (bmin->value <= bmax->value) {
-            return make_const(Int(64), bmax->value - bmin->value + 1);
-        } else {
-            return make_zero(Int(64));
-        }
+    if (!i.is_bounded()) {
+        return Expr();
     }
-    return Expr();
+    // The extent only makes sense when the max >= min otherwise
+    // it is considered to be zero.
+    Expr extent = simplify(i.max - i.min + 1);
+    // TODO(psuriana): should make this deal with symbolic constants
+    if (is_const(extent) && can_prove(extent >= 0)) {
+        return extent;
+    }
+    return make_zero(Int(64));
 }
 
 Expr box_size(const Box &b) {
     Expr size = make_one(Int(64));
     for (size_t i = 0; i < b.size(); i++) {
         Expr extent = get_extent(b[i]);
-        if (!extent.defined() || is_zero(extent)) {
-            return extent;
+        if (extent.defined() && size.defined()) {
+            size *= extent;
+        } else if (is_zero(extent)) {
+            return make_zero(Int(64));
+        } else {
+            return Expr();
         }
-        size *= extent;
     }
     return simplify(size);
 }

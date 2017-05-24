@@ -1216,13 +1216,27 @@ void Partitioner::disp_pipeline_costs() {
     debug(0) << "Group: (name) [arith cost, mem cost, parallelism]" << '\n';
     for (const pair<FStage, Group> &g : groups) {
         const GroupAnalysis &analysis = get_element(group_costs, g.first);
-        total_cost.arith += analysis.cost.arith;
-        total_cost.memory += analysis.cost.memory;
+        if (!total_cost.arith.defined()) {
+            continue;
+        } else if (!analysis.cost.arith.defined()) {
+            total_cost.arith = Expr();
+        } else {
+            total_cost.arith += analysis.cost.arith;
+        }
+
+        if (!total_cost.memory.defined()) {
+            continue;
+        } else if (!analysis.cost.memory.defined()) {
+            total_cost.memory = Expr();
+        } else {
+            total_cost.memory += analysis.cost.memory;
+        }
 
         debug(0) << "Group: " << g.first << " [";
         debug(0) << analysis.cost.arith << ", " << analysis.cost.memory
                  << ", " << analysis.parallelism << "]\n";
     }
+    total_cost.simplify();
     debug(0) << "Total arithmetic cost: " << total_cost.arith << '\n';
     debug(0) << "Total memory cost: " << total_cost.memory << '\n';
     debug(0) << "===============" << '\n';
@@ -1790,8 +1804,8 @@ Partitioner::GroupAnalysis Partitioner::analyze_group(const Group &g, bool show_
     }
 
     // Count the number of tiles
-    Expr estimate_tiles = 1;
-    Expr parallelism = 1;
+    Expr estimate_tiles = make_one(Int(64));
+    Expr parallelism = make_one(Int(64));
 
     const vector<Dim> &dims = def.schedule().dims();
 
@@ -1999,7 +2013,9 @@ Partitioner::GroupAnalysis Partitioner::analyze_group(const Group &g, bool show_
         parallelism);
     g_analysis.simplify();
 
-    internal_assert(can_prove(g_analysis.cost.memory > 0));
+    debug(0) << "\nanalysis: " << g_analysis << "\n";
+
+    internal_assert(can_prove(g_analysis.cost.memory > 0)) << "g_analysis.cost.memory: " << g_analysis.cost.memory << "\n";
 
     return g_analysis;
 }
@@ -3163,11 +3179,14 @@ string generate_schedules(const vector<Function> &outputs, const Target &target,
     // we remove any functions from 'env'). We need the full realization
     // order to pass to get_func() when generating the string representation
     // of the schedule.
-    debug(5) << "Computing full realization order...\n";
+    debug(0) << "Computing full realization order...\n";
     vector<string> full_order = realization_order(outputs, env);
 
+    int original_env_size = env.size();
+    debug(0) << "\n\nOriginal env size: " << original_env_size << "\n";
+
     // Validate that none of the functions in the pipeline have partial schedules.
-    debug(5) << "Validating no partial schedules...\n";
+    debug(0) << "Validating no partial schedules...\n";
     for (const auto &iter : env) {
         validate_no_partial_schedules(iter.second);
     }
@@ -3175,44 +3194,48 @@ string generate_schedules(const vector<Function> &outputs, const Target &target,
     // The auto scheduling algorithm requires estimates on the outputs of the
     // pipeline to get quantitative estimates of costs for computing functions
     // in the pipeline.
-    debug(5) << "Checking estimates on outputs...\n";
+    debug(0) << "Checking estimates on outputs...\n";
     check_estimates_on_outputs(outputs);
 
-    debug(5) << "Inlining all trivial functions...\n";
+    debug(0) << "Inlining all trivial functions...\n";
 
     // Run a pre-pass that inline all trivial Funcs (i.e. if the cost of
     // computing a Func is about the same as calling that Func, we should
     // just inline it).
     inline_all_trivial_functions(outputs, env);
 
+    int current_env_size = env.size();
+    debug(0) << "\n\nCurrent env size: " << current_env_size << "\n";
+    debug(0) << "\nNumber of functions inlined: " << original_env_size - current_env_size << "\n";
+
     // Compute the bounds of function values which are used for dependence analysis.
     vector<string> order = realization_order(outputs, env);
-    debug(5) << "Computing function value bounds...\n";
+    debug(0) << "Computing function value bounds...\n";
     FuncValueBounds func_val_bounds = compute_function_value_bounds(order, env);
 
     // Initialize the cost model.
     // Compute the expression costs for each function in the pipeline.
-    debug(5) << "Initializing region costs...\n";
+    debug(0) << "Initializing region costs...\n";
     RegionCosts costs(env);
     if (debug::debug_level() >= 3) {
         costs.disp_func_costs();
     }
 
-    debug(5) << "Initializing dependence analysis...\n";
+    debug(0) << "Initializing dependence analysis...\n";
     DependenceAnalysis dep_analysis(env, order, func_val_bounds);
 
     // Compute bounds of all functions in the pipeline given estimates on
     // outputs. Also report functions which bounds could not be inferred.
-    debug(5) << "Computing pipeline bounds...\n";
+    debug(0) << "Computing pipeline bounds...\n";
     map<string, Box> pipeline_bounds =
         get_pipeline_bounds(dep_analysis, outputs, &costs.input_estimates);
 
     // Determine all unbounded functions that are not extern Func or
     // used by some extern Funcs.
-    debug(5) << "Determining all unbounded functions...\n";
+    debug(0) << "Determining all unbounded functions...\n";
     set<string> unbounded = get_unbounded_functions(pipeline_bounds, env);
 
-    debug(5) << "Initializing partitioner...\n";
+    debug(0) << "Initializing partitioner...\n";
     Partitioner part(pipeline_bounds, arch_params, dep_analysis, costs, outputs, unbounded);
 
     // Compute and display reuse
@@ -3234,35 +3257,35 @@ string generate_schedules(const vector<Function> &outputs, const Target &target,
 
     // Display the current pipeline graph.
     // TODO: Output the graph in dot format.
-    if (debug::debug_level() >= 3) {
+    if (debug::debug_level() >= 0) {
         part.disp_pipeline_graph();
         part.disp_pipeline_bounds();
     }
 
-    debug(5) << "Partitioner initializing groups...\n";
+    debug(0) << "Partitioner initializing groups...\n";
     part.initialize_groups();
-    if (debug::debug_level() >= 3) {
+    if (debug::debug_level() >= 0) {
         part.disp_pipeline_costs();
     }
 
-    debug(5) << "Partitioner computing inline group...\n";
+    debug(0) << "Partitioner computing inline group...\n";
     part.group(Partitioner::Level::Inline);
-    if (debug::debug_level() >= 3) {
+    if (debug::debug_level() >= 0) {
         part.disp_grouping();
     }
 
-    debug(5) << "Partitioner computing fast-mem group...\n";
+    debug(0) << "Partitioner computing fast-mem group...\n";
     part.grouping_cache.clear();
     part.group(Partitioner::Level::FastMem);
-    if (debug::debug_level() >= 3) {
+    if (debug::debug_level() >= 0) {
         part.disp_pipeline_costs();
         part.disp_grouping();
         part.disp_pipeline_graph();
     }
 
-    debug(5) << "Initializing AutoSchedule...\n";
+    debug(0) << "Initializing AutoSchedule...\n";
     AutoSchedule sched(env, full_order);
-    debug(5) << "Generating CPU schedule...\n";
+    debug(0) << "Generating CPU schedule...\n";
     part.generate_cpu_schedule(target, sched);
 
     std::ostringstream oss;
